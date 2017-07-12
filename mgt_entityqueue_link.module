@@ -1,0 +1,201 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function mgt_entityqueue_link_menu() {
+  $items['mgt_entityqueue_link/%entityqueue_subqueue/add/%/%'] = array(
+    'page callback' => 'mgt_entityqueue_link_add_entity',
+    'page arguments' => array(1, 3, 4),
+    'access callback' => 'entityqueue_access',
+    'access arguments' => array('update', 1),
+    'type' => MENU_CALLBACK
+  );
+  $items['mgt_entityqueue_link/%entityqueue_subqueue/remove/%/%'] = array(
+    'page callback' => 'mgt_entityqueue_link_remove_entity',
+    'page arguments' => array(1, 3, 4),
+    'access callback' => 'entityqueue_access',
+    'access arguments' => array('update', 1),
+    'type' => MENU_CALLBACK
+  );
+  return $items;
+}
+
+/**
+ * Page callback for entityqueue add link.
+ */
+function mgt_entityqueue_link_add_entity($entityqueue_subqueue, $entity_type, $entity_id) {
+  $queue = entityqueue_queue_load($entityqueue_subqueue->queue);
+  $entities = entity_load($entity_type, array($entity_id));
+  $entity = !empty($entities) ? array_shift($entities) : FALSE;
+  // @TODO need better error handling here
+  if ($queue->target_type == $entity_type && $entity) {
+    $field_name = _entityqueue_get_target_field_name($queue->target_type);
+    $langcode = field_language('entityqueue_subqueue', $entityqueue_subqueue, $field_name);
+    $entityqueue_subqueue->{$field_name}[$langcode][]['target_id'] = $entity_id;
+    entityqueue_subqueue_save($entityqueue_subqueue);
+    print "Ok";
+  } else {
+    print "Error";
+  }
+  exit;
+}
+
+/**
+ * Page callback for entityqueue add link.
+ */
+function mgt_entityqueue_link_remove_entity($entityqueue_subqueue, $entity_type, $entity_id) {
+  $queue = entityqueue_queue_load($entityqueue_subqueue->queue);
+  // @TODO need better error handling here
+  if ($queue->target_type == $entity_type) {
+    $field_name = _entityqueue_get_target_field_name($queue->target_type);
+    $field_items = field_get_items('entityqueue_subqueue', $entityqueue_subqueue, $field_name);
+    if (is_array($field_items)) {
+      $langcode = field_language('entityqueue_subqueue', $entityqueue_subqueue, $field_name);
+      foreach ($field_items as $delta => $field_item) {
+        if ($field_item['target_id'] == $entity_id) {
+          unset($entityqueue_subqueue->{$field_name}[$langcode][$delta]);
+        }
+      }
+      entityqueue_subqueue_save($entityqueue_subqueue);
+    }
+    print "Ok";
+  } else {
+    print "Error";
+  }
+  exit;
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function mgt_entityqueue_link_field_formatter_info() {
+  return array(
+    'mgt_entityqueue_link' => array(
+      'label' => t('Entityqueue link'),
+      'field types' => array('entityreference'),
+      'settings' => array(
+        'add_link_text' => 'Add entity in queue',
+        'remove_link_text' => 'Remove entity from queue',
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function mgt_entityqueue_link_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $element = array();
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  if ($display['type'] == 'mgt_entityqueue_link') {
+    $element['add_link_text'] = array(
+      '#title' => t('Add link text'),
+      '#type' => 'textfield',
+      '#size' => 20,
+      '#default_value' => $settings['add_link_text'],
+      '#required' => TRUE,
+    );
+    $element['remove_link_text'] = array(
+      '#title' => t('Remove link text'),
+      '#type' => 'textfield',
+      '#size' => 20,
+      '#default_value' => $settings['remove_link_text'],
+      '#required' => TRUE,
+    );
+  }
+  return $element;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function mgt_entityqueue_link_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  
+  $summary = '';
+  
+  if ($display['type'] == 'mgt_entityqueue_link') {
+    $summary = t('Add link text: @add_link_text. Remove link text: @remove_link_text',
+      array('@add_link_text' => $settings['add_link_text'], '@remove_link_text' => $settings['remove_link_text']));
+  }
+  
+  return $summary;
+
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function mgt_entityqueue_link_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  $settings = $display['settings'];
+  if ($display['type'] == 'mgt_entityqueue_link') {
+    $entity_wrapper = entity_metadata_wrapper($entity_type, $entity);
+    $entity_id = $entity_wrapper->getIdentifier();
+    foreach ($items as $delta => $item) {
+      $entityqueue_subqueues = entityqueue_subqueue_load_multiple(FALSE, array('subqueue_id' => $item['target_id']));
+      $entityqueue_subqueue = FALSE;
+      if (!empty($entityqueue_subqueues)) {
+        $entityqueue_subqueue = array_shift($entityqueue_subqueues);
+      }
+      $queue = FALSE;
+      if ($entityqueue_subqueue) {
+        $queue = entityqueue_queue_load($entityqueue_subqueue->queue);
+      }
+      if ($queue && $queue->target_type == $entity_type) {
+        $entity_in_subqueue = _mgt_entityqueue_link_is_entity_in_subqueue($entityqueue_subqueue, $entity_type, $entity);
+        $add_link_wrapper_class = 'mgt-entityqueue-link-wrapper mgt-entityqueue-add-link-wrapper';
+        $add_link_wrapper_class .=  $entity_in_subqueue ? ' inactive' : '';
+        $remove_link_wrapper_class = 'mgt-entityqueue-link-wrapper mgt-entityqueue-remove-link-wrapper';
+        $remove_link_wrapper_class .= $entity_in_subqueue ? '' : ' inactive';
+        $add_link = l($settings['add_link_text'],
+          'mgt_entityqueue_link/' . $entityqueue_subqueue->name . '/add/' . $entity_type . '/' . $entity_id);
+        $remove_link = l($settings['remove_link_text'],
+          'mgt_entityqueue_link/' . $entityqueue_subqueue->name . '/remove/' . $entity_type . '/' . $entity_id);
+        $element[$delta] = array(
+          'add_link' => array(
+            '#prefix' => '<div class="' . $add_link_wrapper_class . '">',
+            '#suffix' => '</div>',
+            '#markup' => $add_link,
+          ),
+          'remove_link' => array(
+            '#prefix' => '<div class="' . $remove_link_wrapper_class . '">',
+            '#suffix' => '</div>',
+            '#markup' => $remove_link,
+          ),
+          '#prefix' => '<div class="mgt-entityqueue-links-wrapper">',
+          '#suffix' => '</div>',
+        );
+      }
+    }
+    $element['#attached'] = array(
+      'css' => array(drupal_get_path('module', 'mgt_entityqueue_link') . '/css/mgt_entityqueue_link.css'),
+      'js' => array(drupal_get_path('module', 'mgt_entityqueue_link') . '/js/mgt_entityqueue_link.js'),
+    );
+  }
+  return $element;
+}
+
+/**
+ * Helper function. Determine whether this entity is in queue or not.
+ */
+function _mgt_entityqueue_link_is_entity_in_subqueue($entityqueue_subqueue, $entity_type, $entity) {
+  $in_subqueue = FALSE;
+  $entity_wrapper = entity_metadata_wrapper($entity_type, $entity);
+  $entity_id = $entity_wrapper->getIdentifier();
+  $queue = entityqueue_queue_load($entityqueue_subqueue->queue);
+  $field_name = _entityqueue_get_target_field_name($queue->target_type);
+  $field_items = field_get_items('entityqueue_subqueue', $entityqueue_subqueue, $field_name);
+  if (is_array($field_items)) {
+    foreach ($field_items as $delta => $field_item) {
+      if ($field_item['target_id'] == $entity_id) {
+        $in_subqueue = TRUE;
+        break;
+      }
+    }
+  }
+  return $in_subqueue;
+}
