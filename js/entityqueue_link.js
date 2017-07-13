@@ -1,8 +1,8 @@
 (function ($) {
-  Drupal.behaviors.mgtEntityqueueLink = {
+  Drupal.behaviors.entityqueueLink = {
     attach: function(context) {
-      $('.mgt-entityqueue-link-wrapper').each(function () {
-        $(this).children().once('mgt-entityqueue-link-ajax', function () {
+      $('.entityqueue-link-wrapper').each(function () {
+        $(this).children().once('entityqueue-link-ajax', function () {
           $(this).click(function (e) {
             e.preventDefault();
             var linkClicked = $(this);
@@ -13,7 +13,7 @@
               type: "POST",
               url: url,
               success: function(data) {
-                var linksWrapper = linkClicked.parents('.mgt-entityqueue-links-wrapper');
+                var linksWrapper = linkClicked.parents('.entityqueue-links-wrapper');
                 linksWrapper.children().toggleClass('inactive');
               }
             });
